@@ -1,0 +1,289 @@
+---
+title: "04_Exploration"
+output:
+  html_document:
+    code_folding: show
+date: "2023-09-24"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Load data container
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/all_data.rds"))
+```
+
+
+# Identifying confounding meta variables
+
+Before we go onto any official analysis, it is worth checking if any of our metadata variables are correlating strongly with our outcome (ie. `CAD` vs `noCAD`).
+
+## Age
+
+The Kruskal-Wallis test evaluates whether there is any significant in medians of two groups. As seen below, the p-value for this test is ~0.5, meaning there is likely no meaningful relationship:
+
+``` {r}
+kruskal.test(age ~ group, data$samples)
+```
+
+To see this visually, we can generate a boxplot:
+
+``` {r}
+data$samples %>% ggplot(aes(x = age, y = group,
+                      group = group, fill = group)) + 
+  geom_boxplot() + 
+  theme_bw() + 
+  scale_fill_manual(name = "Group",
+                      values = Palette(2)) +
+  theme(legend.position = "none") +
+  xlab("Age") + 
+  ylab("Sample group")
+```
+
+## Sex
+
+As sex is a categorical variable, rather than a numeric one (like age), we will use the Fisher test. The p-value is ~1, meaning it is thoroughly unlikely that there is an association here:
+
+``` {r}
+fisher.test(x = data$samples$sex, 
+             y = data$samples$group)$p.value
+```
+
+To confirm this, look at the contingency table between sample group and sex:
+
+``` {r}
+table(data$samples$sex, data$samples$group)
+```
+
+## Race
+
+As the `race` variable has four levels, we need to use the ChiSquare test. First we make a table to see the distribution across these two variables. The ChiSquare test has a p-value of ~1, once again suggesting that there is a slim likelihood of association between these variables:
+
+``` {r}
+raceVsGroup <- table(data$samples$race, data$samples$group)
+raceVsGroup
+
+chisq.test(raceVsGroup)$p.value
+```
+
+Given these inspections, it seems these three meta data variables have little to no association with our outcome of interest, which is definitely good to see.
+
+# Feature variability
+
+A good place to start when exploring data is the variability of our input features. Note the `log10` transform of y-axis in the next two plots. Points below `y = 0` correspond to feature counts of 0, points at `y = 0` correspond to feature count of 1.
+
+For both lipids and proteins, the vast majority of features have very low variability when compared to their feature of highest variance. This suggests we will need to filter features from the bottom and the top of this variance spectrum to ensure our models are generating reliable results. 
+
+## Lipids
+
+```{r}
+# Calculate variance of each column in the data frame
+vars <- data$dfs$lipids %>% lapply(var) %>% unlist()
+
+# Calculate densities
+h <- hist(vars, plot=F, breaks = 100)
+
+data.table(h$breaks[-1], log10(h$counts)) %>% 
+  ggplot(aes(x=V1, y=V2)) +
+  geom_line() + geom_point() + 
+  theme_bw() +
+  xlab("Feature variability") +
+  ylab("Log10 transformed feature count") +
+  labs(title="Lipid feature variability histogram")
+```
+
+## Proteins
+
+```{r}
+# Calculate variance of each column in the data frame
+vars <- data$dfs$proteins %>% lapply(var) %>% unlist()
+
+# Calculate densities
+h <- hist(vars[vars < 1e+10], plot=F, breaks = 100)
+
+data.table(h$breaks[-1], (h$counts)) %>% 
+  ggplot(aes(x=V1, y=V2)) +
+  geom_line() + geom_point() + 
+  theme_bw() +
+  xlab("Feature variability") +
+  ylab("Log10 transformed feature count") +
+  labs(title="Protein feature variability histogram")
+```
+
+
+# Sample correlations
+
+Next, we will look at how our samples correlate across the two datasets. 
+
+## Lipids
+
+The correlation of all samples across the lipid dataset is relatively interesting. We can see a number of small clusters of samples, each of which commonly contain samples from both the `CAD` and `noCAD` groups. This isn't necessarily a problem, it more just suggests that we need to process this data further to achieve distinction between our groups.
+
+``` {r}
+# Transpose dataframe and adjust column names
+df <- data$dfs$lipids %>% t() %>% as.data.table()
+colnames(df) <- data$samples$names
+
+# Calculate correlations and plot heatmap
+df %>% cor() %>% 
+  cim(row.sideColors = Palette(2)[as.integer(data$sample$group)],
+      col.sideColors = Palette(2)[as.integer(data$sample$group)])
+```
+
+## Proteins
+
+The samples form three, much larger clusters in the protein dataset when compared to their clustering across the lipid data. Once again, within these clusters there is a mixture of `CAD` and `noCAD` samples in each of these. 
+
+``` {r}
+# Transpose dataframe and adjust column names
+df <- data$dfs$proteins %>% t() %>% as.data.table()
+colnames(df) <- data$samples$names
+
+# Calculate correlations and plot heatmap
+df %>% cor() %>% 
+  cim(row.sideColors = Palette(2)[as.integer(data$sample$group)],
+      col.sideColors = Palette(2)[as.integer(data$sample$group)])
+```
+
+
+# Feature correlations
+
+Now we can look at how the features of each dataset are correlating with one another. 
+
+***NB:*** *the row and column names of each of these heatmaps do not include all the features as there are too many.*
+
+## Lipids
+
+We'll start with the lipids. There are distinct clustering of correlation, as seen by the darker-red blocks within the heatmap. The `TAG` lipids are clustering very well together which is to be expected, A few `CE` lipids being included in these clusters. For the most part, all the other lipid classes are clustering together too. This indicates that we can likely remove some features from each of the lipid classes (mostly the `TAG` class) and still retain more or less the same amount of information - thereby reducing noise and increasing differentiability of our sample groups.
+
+``` {r}
+# Calculate correlations and plot heatmap
+data$dfs$lipids %>% cor() %>% 
+  cim(row.sideColors = Palette(12)[as.integer(data$features$lipid$class)],
+      col.sideColors = Palette(12)[as.integer(data$features$lipid$class)])
+```
+
+## Proteins
+
+This heat map is really nice to see, such that part from a few different small clusters of proteins, most of the protein-pairs are not strongly correlated, meaning we have a greater proportion of orthogonal information to use in downstream classifiers.
+
+``` {r}
+# Calculate correlations and plot heatmap
+data$dfs$proteins %>% cor() %>% cim()
+```
+
+
+## Lipids vs proteins
+
+Now we can look at how the lipids are correlated with the proteins to see if there are any relationships to be aware of prior to model building. The `APOC` proteins are positively correlated with most of the lipids (save for the `FFA` and `LCER` classes). Otherwise, there doesn't seem to be many strong trends in this data. This is somewhat of a double edged sword: it means once we integrate these datasets we will have a greater degree of orthogonality in our data. However, identifying biological pathways involving both of these omics types will be more difficult.
+
+``` {r}
+# Calculate correlations and plot heatmap
+cor(data$dfs$proteins, data$dfs$lipids) %>% 
+  cim(col.sideColors = Palette(12)[as.integer(data$features$lipid$class)])  
+```
+
+
+# Association with CAD variable
+
+The last thing that's worth have a look at is the general proportion of features in each data frame which have some association with our CAD variable. 
+
+## Lipids
+
+```{r}
+# Iterate through each feature. For each, run kruskal-wallis test against outcome and extract p-value
+pVals <- data$dfs$lipids %>% lapply(function(f) {
+  df <- cbind(val = f, group = data$samples$group)
+  kruskal.test(val ~ group, df)$p.value
+}) %>% unlist()
+```
+
+Before multiple testing corrections, there are 11 lipid features with a significant (0.05) association with the outcome variable. These are:
+
+```{r}
+# Determine which p-values are less than threshold
+(pVals<0.05) %>% which() %>% names()
+```
+
+After a false discovery rate correction ("FDR"), this drops to 0. Virtually every single lipid feature is assigned a p-value of ~1.
+
+```{r}
+# Calculate densities of p-values prior and post multiple-testing corrections
+pValHist <- pVals %>% hist(plot=F, breaks = seq(0, 1, 0.02))
+pValAdjHist <- pVals %>% p.adjust("fdr") %>% hist(plot=F, breaks = seq(0, 1, 0.02))
+
+# Place into dataframe
+dt <- data.table(pValHist$breaks[-1]-0.01, 
+           pValHist$counts,
+           pValAdjHist$counts) 
+colnames(dt) <- c("pValue", "rawCount", "adjCount")
+
+dt %>% gather("key", "count", -pValue) %>% 
+  ggplot(aes(x=pValue, y=count,
+             group = key, fill = key)) +
+  geom_bar(stat="identity",
+           position = position_dodge()) + 
+  theme_bw() +
+  xlab("Kruskal-Wallis p-value") +
+  ylab("Feature count") +
+  labs(title="Lipid kruskal-wallis test vs sample group p-value distribution") +
+  scale_fill_manual(name = "Legend",
+                    labels = c("Adjusted p-value", "Raw p-value"),
+                    values = Palette(2)) +
+  geom_vline(xintercept = 0.05,
+             color = "red", linetype = "dotted")
+```
+
+
+
+## Proteins
+
+
+
+```{r}
+# Iterate through each feature. For each, run kruskal-wallis test against outcome and extract p-value
+pVals <- data$dfs$proteins %>% lapply(function(f) {
+  df <- cbind(val = f, group = data$samples$group)
+  kruskal.test(val ~ group, df)$p.value
+}) %>% unlist()
+```
+
+Before multiple testing corrections, there are 32 protein features with a significant (0.05) association with the outcome variable. These are:
+
+```{r}
+# Determine which p-values are less than threshold
+(pVals<0.05) %>% which() %>% names()
+```
+
+After a false discovery rate correction ("FDR"), this drops to 0. However, the protein features retain some distribution of p-values. This suggests that there are likely going to be a larger proportion of protein features which play key roles in predicting sample group when compared to lipids. 
+
+```{r}
+# Calculate densities of p-values prior and post multiple-testing corrections
+pValHist <- pVals %>% hist(plot=F, breaks = seq(0, 1, 0.02))
+
+# Place into dataframe
+dt <- data.table(pValHist$breaks[-1]-0.01, 
+           pValHist$counts,
+           pValAdjHist$counts) 
+colnames(dt) <- c("pValue", "rawCount", "adjCount")
+
+dt %>% gather("key", "count", -pValue) %>% 
+  ggplot(aes(x=pValue, y=count,
+             group = key, fill = key)) +
+  geom_bar(stat="identity",
+           position = position_dodge()) + 
+  theme_bw() +
+  xlab("Kruskal-Wallis p-value") +
+  ylab("Feature count") +
+  labs(title="Protein kruskal-wallis test vs sample group p-value distribution") +
+  scale_fill_manual(name = "Legend",
+                    labels = c("Adjusted p-value", "Raw p-value"),
+                    values = Palette(2)) +
+  geom_vline(xintercept = 0.05,
+             color = "red", linetype = "dotted")
+```

@@ -1,0 +1,423 @@
+---
+title: "06_Feature_Processing"
+output: 
+  html_document:
+    code_folding: show
+date: "2023-10-07"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Load data container
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/all_data.rds"))
+```
+
+
+# Filtering
+
+Given the inefficacy of some of the models seen in section `05_Basic_Models`, as well as the feature correlations seen in `04_Exploration`, it is likely worth filtering some of these out.
+
+## Variance
+
+First we will remove features with extreme degrees of variance. Any feature below the 1st percentile and above the 99th percentile will be filtered out.
+
+### Lipids
+
+```{r}
+# Calculate variation for each feature
+vars <- data$dfs$lipids %>% lapply(var) %>% unlist()
+
+# Set cutoff at 1th and 99th percentile. Determine which feature variances are outside these bounds
+range <- quantile(vars, c(0.01, 0.99))
+idx <- between(vars, range[1], range[2])
+
+# Remove undesired features from object 
+data$dfs$lipids <- data$dfs$lipids[,idx,with=F]
+data$features$lipids$class <- data$features$lipids$class[idx]
+data$features$lipids$ID <- data$features$lipids$ID[idx]
+```
+
+This resulted in the filtering out of `r sum(!idx)` features, leaving `r sum(idx)` lipids. 
+
+### Proteins
+
+```{r}
+# Calculate variation for each feature
+vars <- data$dfs$proteins %>% lapply(var) %>% unlist()
+
+# Set cutoff at 1th and 99th percentile. Determine which feature variances are outside these bounds
+range <- quantile(vars, c(0.01, 0.99))
+idx <- between(vars, range[1], range[2])
+
+# Remove undesired features from object 
+data$dfs$proteins <- data$dfs$proteins[,between(vars, range[1], range[2]),with=F]
+data$features$proteins$ID <- data$features$proteins$ID [idx]
+```
+
+This resulted in the filtering out of `r sum(!idx)` features, leaving `r sum(idx)` proteins. 
+
+## Intercorrelations
+
+Next, we will remove features based on their intercorrelation to other input features.
+
+### Lipids
+
+As was seen in `04_Exploration`, the lipid dataset has a very high degree of feature intercorrelation. This is hardly ideal as it adds needless time and space complexity to our methods, as well as may cause spurious conclusions to be drawn from the data. We can see below there is a large number of lipid-pairs where their correlation is quite high. 
+
+```{r}
+# Calculate absolute correlation matrix of lipids, reformat then remove any rows with missing values. Then plot
+(data$dfs$lipids %>% AbsCorMat() %>% gather() %>% filter(!is.na(value))) %>% 
+  ggplot(aes(x=value)) + 
+  geom_histogram(bins = 100,
+                 colour = "black",
+                 fill = Palette(2)[2]) + 
+  theme_bw() + 
+  xlab("Correlation value") + 
+  ylab("Feature pair count") + 
+  ggtitle("Lipid feature intercorrelation distribution")
+```
+
+We can look at how setting different intercorrelation thresholds impacts the number of features we retain:
+
+```{r}
+Plot_Intercorrelation_Threshold(data$dfs$lipids)
+```
+
+We select a threshold of `0.8` using the *"elbow"* method.
+
+```{r}
+corThreshold <- 0.8
+lipidsReduced <- Remove_Intercorrelated_Features(data$dfs$lipids, 
+                                                 corThreshold)
+```
+
+This leaves us with `r ncol(lipidsReduced)` lipids, compared to the starting quantity of `r ncol(data$dfs$lipids)`. As discussed, there are many of these lipids which are unlikely going to not be very useful to analysis and so can be removed, especially if their information is captured by other lipid features. Now we can update our data object:
+
+``` {r}
+# Update object
+lipidIdx <- colnames(data$dfs$lipids) %in% colnames(lipidsReduced)
+data$dfs$lipids <- lipidsReduced
+data$features$lipids$ID <- data$features$lipids$ID[lipidIdx]
+data$features$lipids$class <- data$features$lipids$class[lipidIdx]
+```
+
+
+
+### Proteins
+
+The distribution of protein feature intercorrelations is a lot more encouraging, especially given their reduced quantity and greater likelihood for predictive power on the outcome variable. 
+
+```{r}
+# Calculate absolute correlation matrix of proteins, reformat then remove any rows with missing values. Then plot
+(data$dfs$proteins %>% AbsCorMat() %>% gather() %>% filter(!is.na(value))) %>% 
+  ggplot(aes(x=value)) + 
+  geom_histogram(bins = 100,
+                 colour = "black",
+                 fill = Palette(2)[2]) + 
+  theme_bw() + 
+  xlab("Correlation value") + 
+  ylab("Feature pair count") + 
+  ggtitle("Protein feature intercorrelation distribution")
+```
+
+Once again, we will use the elbow method to select our retained number of features, setting it to a maximum of 0.7.
+
+```{r}
+Plot_Intercorrelation_Threshold(data$dfs$proteins)
+```
+
+```{r}
+corThreshold <- 0.7
+proteinsReduced <- Remove_Intercorrelated_Features(data$dfs$proteins, 
+                                                 corThreshold)
+```
+
+This leaves us with `r ncol(proteinsReduced)` proteins, compared to the starting quantity of `r ncol(data$dfs$proteins)`. Now we can update our data object:
+
+``` {r}
+# Update object
+proteinIdx <- colnames(data$dfs$proteins) %in% colnames(proteinsReduced)
+data$dfs$proteins <- proteinsReduced
+data$features$proteins$ID <- data$features$proteins$ID[proteinIdx]
+```
+
+
+## Save Filtered data
+
+``` {r}
+data %>% saveRDS(paste0(wd, "RDS/Data_Objects/filtered_data.rds"))
+```
+
+
+# Feature Engineering
+
+Next, we will play around with feature engineering. I tried a few different methods, the two of which yielded the best results were multiplying lipid and protein features (referred here on out as *"factor features"*) and the ratio of lipid to protein features (referred here on out as *"ratio features"*). 
+
+The rough methodology works as follows:
+
+- Scale the lipid and protein datasets
+- For both methods (factor and ratio):
+  - Iterate through each possible pair of lipid and protein feature, generating the engineered feature
+  - If that novel feature has lower than a `0.05` p-value in a Kruskal-Wallis test against the outcome variable, store it
+  - Resulted in over 1000 features for each method
+  - Take the 100 features with the lowest adjusted p-value (FDR correction) from each method
+    - This value of 100 was selected via looking at model performances using different values
+  - Store these in our data container
+  
+*Important note: this methodology is not perfect as we are using our outcome variable to select features for a model on that outcome. However, due to the total sum of over 22000 possible pairs of lipid-proteins, we need a rigourous selection criteria. I explored various different methodologies (eg. top variable features), all of which were significantly effected by outliers.*
+
+```{r}
+# Scale features first
+lipidScale <-  scale(data$dfs$lipids)
+proteinScale <-  scale(data$dfs$proteins)
+
+# Determine how many features we want from each method
+nFeatPerMethod <- 100
+```
+
+## Factor of each variable pair
+
+``` {r}
+factorFeats <- lapply(1:ncol(lipidScale), function(i) {
+  # For each lipid ...
+  lipid <- lipidScale[,i]
+  
+  o <- lapply(1:ncol(proteinScale), function(j) {
+    # ... and protein pair
+    protein <- proteinScale[,j]
+    
+    # Generate novel feature
+    feat <- lipid * protein
+    # Evaluate KW test. If significant, retain feature
+    if (kruskal.test(feat, data$samples$group)$p.value < 0.05) {
+      return(feat)
+    }
+    # Otherwise, return nothing
+    return(rep(NA, 70))
+  }) %>% as.data.frame()
+  
+  # Update column names of lipid specific dataframe
+  colnames(o) <- paste0(colnames(lipidScale)[i], 
+                        "_", colnames(proteinScale),
+                        "_factor")
+  # Remove any features with all NAs (ie didnt pass KW test)
+  o <- o[,colSums(is.na(o))==0,drop=F] %>% as.data.table()
+  o
+})
+
+# Remove any lipid-specific dataframes with no features
+factorFeats <- factorFeats[lapply(factorFeats, ncol) %>% 
+                                     unlist() > 0]
+# Combine all features into one dataframe
+factorFeats <- do.call(cbind, factorFeats)
+
+# Calculate p-values for each feature via KW test
+pVals <- factorFeats %>% lapply(function(f) {
+  df <- cbind(val = f, group = data$samples$group)
+  kruskal.test(val ~ group, df)$p.value
+}) %>% unlist()
+
+# Adjust for multiple-testing
+pValAdj <- pVals %>% p.adjust("fdr")
+
+# Determine which are top features based on adjusted p-value
+topFeatNames <- sort(pValAdj, decreasing = T)[1:nFeatPerMethod] %>% names()
+topFeatIdx <- which(colnames(factorFeats) %in% topFeatNames)  
+
+# Subset dataframe
+factorFeats <- factorFeats[,topFeatIdx,with=F]
+```
+
+## Ratio of each variable pair
+
+``` {r}
+ratioFeats <- lapply(1:ncol(lipidScale), function(i) {
+  # For each lipid ...
+  lipid <- lipidScale[,i]
+  
+  o <- lapply(1:ncol(proteinScale), function(j) {
+    # ... and protein pair
+    protein <- proteinScale[,j]
+    
+    # Generate novel feature
+    feat <- lipid / protein
+    # Evaluate KW test. If significant, retain feature
+    if (kruskal.test(feat, data$samples$group)$p.value < 0.05) {
+      return(feat)
+    }
+    # Otherwise, return nothing
+    return(rep(NA, 70))
+  }) %>% as.data.frame()
+  
+  # Update column names of lipid specific dataframe
+  colnames(o) <- paste0(colnames(lipidScale)[i], 
+                        "_", colnames(proteinScale),
+                        "_ratio")
+  # Remove any features with all NAs (ie didnt pass KW test)
+  o <- o[,colSums(is.na(o))==0,drop=F] %>% as.data.table()
+  o
+})
+
+# Remove any lipid-specific dataframes with no features
+ratioFeats <- ratioFeats[lapply(ratioFeats, ncol) %>% 
+                                     unlist() > 0]
+# Combine all features into one dataframe
+ratioFeats <- do.call(cbind, ratioFeats)
+
+# Calculate p-values for each feature via KW test
+pVals <- ratioFeats %>% lapply(function(f) {
+  df <- cbind(val = f, group = data$samples$group)
+  kruskal.test(val ~ group, df)$p.value
+}) %>% unlist()
+
+# Adjust for multiple-testing
+pValAdj <- pVals %>% p.adjust("fdr")
+
+# Determine which are top features based on adjusted p-value
+topFeatNames <- sort(pValAdj, decreasing = T)[1:nFeatPerMethod] %>% names()
+topFeatIdx <- which(colnames(ratioFeats) %in% topFeatNames)  
+
+# Subset dataframe
+ratioFeats <- ratioFeats[,topFeatIdx,with=F]
+```
+
+## Combine two engineering methods
+
+```{r}
+# Combine both forms of feature engineering
+data$dfs$engineered <- cbind(factorFeats, ratioFeats) %>% as.data.table()
+
+# Determine which lipid, protein and method yielded novel feature
+lipidName <- strsplit(colnames(data$dfs$engineered ), "_") %>% 
+  lapply(function(x) {x[1]}) %>% unlist()
+proteinName <- strsplit(colnames(data$dfs$engineered ), "_") %>% 
+  lapply(function(x) {x[2]}) %>% unlist()
+methodName <- strsplit(colnames(data$dfs$engineered ), "_") %>% 
+  lapply(function(x) {x[3]}) %>% unlist()
+
+# Add to data object features
+data$features$engineered <- data.table(lipid = lipidName,
+                                    protein = proteinName,
+                                    method = methodName)
+```
+
+## Check for redundant features
+
+As per the suggestion of Patrick, we should check that there isn't a factor and ratio feature using the same pair of lipid:protein pair. We can see below that there is one feature pair where both the factor and ratio combinations are included in this set of engineered features
+
+``` {r}
+# Count frequency of lipid-protein pair occurances
+uniqueEngineerPairs <- paste0(data$features$engineered$lipid, 
+                              "_", 
+                              data$features$engineered$protein) %>% table()
+# Print any that occur more than once
+which(uniqueEngineerPairs > 1)
+
+```
+
+We'll remove the ratio feature and retain the factor feature:
+
+``` {r}
+# Determine where redundant feature is
+redundantEngineerIdx <- which(data$features$engineered$lipid == "PE(P-16:0/22:4)" &
+                                data$features$engineered$protein == "UN45A" &
+                                data$features$engineered$method == "ratio")
+
+# Remove from object
+data$dfs$engineered <- data$dfs$engineered[,-redundantEngineerIdx,with=F]
+data$features$engineered <- data$features$engineered[-redundantEngineerIdx,]
+```
+
+## Used features for engineering
+
+### Lipids
+
+Next, we can have a brief look at the lipid and protein features which were preferentially selected as part of feature engineering. The most commonly used lipid was `CE(12:0)`. There seems to be a variety of different lipid classes which were commonly used as part of feature engineering
+
+``` {r}
+(data$features$engineered$lipid %>% table() %>% sort(decreasing = T))[1:10]
+```
+Below a histogram of the frequency of lipid usage can be seen. We can see that there were 38 lipids which were only used once in engineered features. Only a few lipids were used more than 3 times.
+
+
+``` {r}
+# Calculate frequency of lipid use
+table <- data$features$engineered$lipid %>% 
+  table() %>% 
+  Full.Table(all.vals = 1:10)
+
+# Reformat into data.frame
+plotDF <- cbind(as.integer(names(table)), as.integer(unname(table))) %>% as.data.table()
+colnames(plotDF) <- c("Frequency", "Count")
+
+# Plot
+plotDF %>% ggplot(aes(x=Frequency, y = Count)) + geom_bar(stat = "identity") + 
+  theme_bw() + 
+  xlab("Number of times a lipid was used in an engineered feature") + 
+  ylab("Frequency") +
+  scale_x_continuous(breaks = 1:10) + 
+  geom_text(aes(label = Count),
+            nudge_y = 0.5)
+```
+
+### Proteins
+
+We can see here the most used protein features as part of engineering.
+
+``` {r}
+(data$features$engineered$protein %>% table() %>% sort(decreasing = T))[1:10]
+```
+
+The equivalent plot to above can be seen for the proteins directly below. It encouraging to see that the majority of proteins were only used once, with only a few being used more than two times.
+
+
+``` {r}
+# Calculate frequency of protein use
+table <- data$features$engineered$protein %>% 
+  table() %>% 
+  Full.Table(all.vals = 1:10)
+
+# Reformat into data.frame
+plotDF <- cbind(as.integer(names(table)), as.integer(unname(table))) %>% as.data.table()
+colnames(plotDF) <- c("Frequency", "Count")
+
+# Plot
+plotDF %>% ggplot(aes(x=Frequency, y = Count)) + geom_bar(stat = "identity") + 
+  theme_bw() + 
+  xlab("Number of times a protein was used in an engineered feature") + 
+  ylab("Frequency") +
+  scale_x_continuous(breaks = 1:10) + 
+  geom_text(aes(label = Count),
+            nudge_y = 0.5)
+```
+
+## Basic model using engineered features
+
+Now that we've produced our 200 engineered features (100 best factor and 100 best ratio features), we can put them into a basic PLSDA model to see how they perform. The efficacy speaks for itself in the below projection plot. A linear decision boundary can be formed from combining both components. The loadings for these components can be found in Supplementary Figures 7 & 8 respectively.
+
+
+``` {r}
+plsdaObj <- plsda(data$dfs$engineered,
+                  data$samples$group)
+
+plotIndiv(plsdaObj,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Engineered PLSDA",
+          col = Group.Palette)
+```
+
+
+## Save Engineered data
+
+``` {r}
+data %>% saveRDS(paste0(wd, "RDS/Data_Objects/engineered_data.rds"))
+```

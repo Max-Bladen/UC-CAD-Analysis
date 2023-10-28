@@ -1,0 +1,345 @@
+---
+title: "99_Supplemental_Figures"
+output:
+  html_document:
+    code_folding: hide
+date: "2023-09-24"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+
+# 05_Basic_Models
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/all_data.rds"))
+```
+
+## Lipid PCAs
+
+``` {r, fig.show = "hide"}
+pcaObj <- pca(data$dfs$lipids)
+
+plot1 <- plotIndiv(pcaObj,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "",
+          col = Group.Palette)$graph
+
+plot2 <- plotIndiv(pcaObj,
+          group = data$samples$group, 
+          pch = data$samples$sex,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Sex',
+          title = "",
+          col = Group.Palette)$graph
+
+plot3 <- plotIndiv(pcaObj,
+          group = data$samples$group, 
+          pch = data$samples$race,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Race',
+          title = "",
+          col = Group.Palette)$graph
+
+plot4 <- plotIndiv(pcaObj,
+          group = data$samples$group, 
+          pch = data$samples$ageDisc,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Age',
+          title = "",
+          col = Group.Palette)$graph
+```
+
+``` {r, fig.cap = "Supp. Figure 1"}
+Plot_Grid(list(plot1, plot2,
+               plot3, plot4))
+```
+
+## Protein PCAs
+
+``` {r, fig.show = "hide"}
+pcaObj <- pca(data$dfs$proteins)
+
+plot1 <- plotIndiv(pcaObj,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "",
+          col = Group.Palette)$graph
+
+plot2 <- plotIndiv(pcaObj,
+          group = data$samples$group, 
+          pch = data$samples$sex,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Sex',
+          title = "",
+          col = Group.Palette)$graph
+
+plot3 <- plotIndiv(pcaObj,
+          group = data$samples$group, 
+          pch = data$samples$race,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Race',
+          title = "",
+          col = Group.Palette)$graph
+
+plot4 <- plotIndiv(pcaObj,
+          group = data$samples$group, 
+          pch = data$samples$ageDisc,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Age',
+          title = "",
+          col = Group.Palette)$graph
+```
+
+``` {r, fig.cap = "Supp. Figure 2"}
+Plot_Grid(list(plot1, plot2,
+               plot3, plot4))
+```
+
+## Lipid PLSDAs
+
+``` {r, fig.show = "hide"}
+plsdaObj <- plsda(data$dfs$lipids,
+                data$samples$group,,
+                scale=T)
+
+plot1 <- plotIndiv(plsdaObj,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "",
+          col = Group.Palette)$graph
+
+plot2 <- plotIndiv(plsdaObj,
+          group = data$samples$group, 
+          pch = data$samples$sex,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Sex',
+          title = "",
+          col = Group.Palette)$graph
+
+plot3 <- plotIndiv(plsdaObj,
+          group = data$samples$group, 
+          pch = data$samples$race,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Race',
+          title = "",
+          col = Group.Palette)$graph
+
+plot4 <- plotIndiv(plsdaObj,
+          group = data$samples$group, 
+          pch = data$samples$ageDisc,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Age',
+          title = "",
+          col = Group.Palette)$graph
+```
+
+``` {r, fig.cap = "Supp. Figure 3"}
+Plot_Grid(list(plot1, plot2,
+               plot3, plot4))
+```
+
+## Protein PLSDAs
+
+``` {r, fig.show = "hide"}
+plsdaObj <- plsda(data$dfs$proteins,
+                data$samples$group,,
+                scale=T)
+
+plot1 <- plotIndiv(plsdaObj,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "",
+          col = Group.Palette)$graph
+
+plot2 <- plotIndiv(plsdaObj,
+          group = data$samples$group, 
+          pch = data$samples$sex,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Sex',
+          title = "",
+          col = Group.Palette)$graph
+
+plot3 <- plotIndiv(plsdaObj,
+          group = data$samples$group, 
+          pch = data$samples$race,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Race',
+          title = "",
+          col = Group.Palette)$graph
+
+plot4 <- plotIndiv(plsdaObj,
+          group = data$samples$group, 
+          pch = data$samples$ageDisc,
+          legend = TRUE, 
+          legend.title = 'Group',
+          legend.title.pch = 'Age',
+          title = "",
+          col = Group.Palette)$graph
+```
+
+``` {r, fig.cap = "Supp. Figure 4"}
+Plot_Grid(list(plot1, plot2,
+               plot3, plot4))
+```
+
+
+# 06_Feature_Processing
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/all_data.rds"))
+```
+
+```{r, fig.show='hide'}
+lipidsReduced <- Remove_Intercorrelated_Features(data$dfs$lipids, 0.85)
+
+plot1 <- (plsda(data$dfs$lipids, data$samples$group, scale=T) %>% 
+            plotIndiv(group = data$samples$group,
+                      ind.names=F))[["graph"]]
+plot2 <- (plsda(lipidsReduced, data$samples$group, scale=T) %>% 
+            plotIndiv(group = data$samples$group,
+                      ind.names=F))[["graph"]]
+```
+
+```{r, fig.height=10, fig.cap = "Supp. Figure 5"}
+Plot_Grid(list(plot1, plot2))
+```
+
+```{r, fig.show='hide'}
+proteinsReduced <- Remove_Intercorrelated_Features(data$dfs$proteins, 0.7)
+
+plot1 <- (plsda(data$dfs$proteins, data$samples$group, scale=T) %>% 
+            plotIndiv(group = data$samples$group,
+                      ind.names=F))[["graph"]]
+plot2 <- (plsda(proteinsReduced, data$samples$group, scale=T) %>% 
+            plotIndiv(group = data$samples$group,
+                      ind.names=F))[["graph"]]
+```
+
+```{r, fig.height=10, fig.cap = "Supp. Figure 6"}
+Plot_Grid(list(plot1, plot2))
+```
+
+
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/engineered_data.rds"))
+```
+
+```{r}
+plsdaObj <- plsda(data$dfs$engineered,
+                  data$samples$group)
+```
+
+```{r, fig.cap = "Supp. Figure 7"}
+plotLoadings(plsdaObj,
+             comp=1,
+             contrib = 'max', 
+             method = 'median',
+             ndisplay = 25)
+```
+
+```{r, fig.cap = "Supp. Figure 8"}
+plotLoadings(plsdaObj,
+             comp=2,
+             contrib = 'max', 
+             method = 'median',
+             ndisplay = 25)
+```
+
+
+
+
+# 07_Model_Building
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/engineered_data.rds"))
+```
+
+```{r, fig.cap = "Supp. Figure 9"}
+lipidPCA <- pca(data$dfs$lipids,
+                scale=T)
+
+plotIndiv(lipidPCA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Filtered lipid PCA",
+          col = Group.Palette)
+```
+
+```{r, fig.cap = "Supp. Figure 10"}
+proteinPCA <- pca(data$dfs$proteins,
+                scale=T)
+
+plotIndiv(proteinPCA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Filtered protein PCA",
+          col = Group.Palette)
+```
+
+```{r, fig.cap = "Supp. Figure 10"}
+engineeredPCA <- pca(data$dfs$engineered,
+                scale=T)
+
+plotIndiv(engineeredPCA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Engineered PCA",
+          col = Group.Palette)
+```
+
+``` {r}
+model <- readRDS(paste0(wd, "RDS/final_model.rds"))
+```
+
+``` {r, results="hide", out.width = "75%", fig.cap = "Supp. Figure 11"}
+auroc(model, roc.comp = 1, roc.block = 1)
+```
+
+``` {r, results="hide", out.width = "75%", fig.cap = "Supp. Figure 12"}
+auroc(model, roc.comp = 1, roc.block = 2)
+```
+
+``` {r, results="hide", out.width = "75%", fig.cap = "Supp. Figure 13"}
+auroc(model, roc.comp = 1, roc.block = 3)
+```
+
+
+``` {r, results="hide", out.width = "75%", fig.cap = "Supp. Figure 14"}
+plotLoadings(model, 
+             comp = 2, 
+             contrib = 'max', 
+             method = 'median',
+             ndisplay = 20) %>% suppressMessages()
+```

@@ -1,0 +1,47 @@
+---
+title: "08_Discussion"
+output: 
+  html_document:
+    code_folding: show
+date: "2023-10-25"
+---
+
+## General summary:
+
+- The data collection procedure worked well and provided the models sufficient, useful data to distinguish our classes:
+  - We saw little to no batch effects in the data.
+  - The clinical metadata variables seemed to be not be related with our outcome variable.
+  - The matched nature of sample collection afforded the model equal information on the two groups of interest.  
+- The lipid dataset contained less orthogonal information due to high degrees of feature intercorrelation and low over variability. The protein dataset was significantly more useful in this regard.
+- The correlations between these two datasets was low when looking at all features (heatmap in `04_Exploration`). Filtering improved this, but even when using a smaller subset of features, there was still high degrees of correlation (circos plot in `07_Model_Building`).
+- When using unsupervised approaches, the groups were very difficult to separate. The addition of the outcome variable to the models (ie. supervised) significantly improved performance. 
+- There was large amounts of noise present in both datasets and required extensive filtered of filtering. When building the final models, only a small subset of lipids were used. A larger proportion of proteins were utilised, but still significantly less than the starting quantity of features. 
+- While the methodology used for engineering could be improved, 
+
+## Key findings:
+
+In short: While the groups were somewhat difficult to separate (given the high clinical similarity of the two groups), these two datasets were able to distinguish the two groups with moderate accuracy. The construction and use of factors and ratios of lipid-protein pairs yielded features of larger predictive power than either of the input datasets individually. Protein features predicted the `no CAD` group more, leading to high degrees of specificity and PPV (and therefore few false positives), but a non-negligible portion of false negatives. In contrast, the lipid features tended to favour the prediction of the `CAD` group, leading to fewer false negatives but more false positives. 
+
+In the context of these types of patients (all of whom will be at some degree of risk), the minimisation of false negatives is more crucial than that of false positives. Hence, while the protein features are more clinically viable and seem to *generally* have a greater proportion of predictive power (and less intercorrelation and noise), my suggestion would be for future study to assay both proteins and lipids. It seems the interaction of these two modalities is key in identifying high-risk diabetes patients. Additionally, these two datasets were each suited to the prediction of one group, suggesting that they contained complementary, and to some degree orthogonal, data. 
+
+In terms of key biomarkers identified in this analysis, there are a few of note - though no individual proteins or lipids which stand out alone as key predictors. The `CE` and `DAG` lipid classes seems to be important to this predictive model, appearing as top predictive features individually and in the engineered features (of particular note is `DAG(18:1/20:5)`). Additionally, higher concentrations of the `PE(18:0/18:0)` lipid seems to be associated with a 
+phenotype of lower CAD risk. 
+
+Of the proteins, the `CERU` proteins seems to play a pivotal role in the identification of the high-risk cohort. It was used consistently in the top protein and engineered features. For similar reasons, the `C1S` and `AATM` proteins also seem like key biomarkers, but to a lesser degree than `CERU`. 
+
+
+## Areas of improvement/Future study
+
+Due to the time constraints of this analysis, there was much and more that I believe would have been worth exploring but I didn't have the oppurtunity to. Of particular note:
+
+- *Outlier detection & removal.* While I did explore sample outliers, due to the small sample size and time constraints, I did not apply any extensive testing of sample outliers nor did I filter any samples out. 
+- *Further feature engineering.* Exploring a wider range of combination methods and using a more rigourous approach to select these novel features would have been well worth it considering the effectiveness of these features in the produced models.
+- *More extensive model tuning.* Due to the time complexity of tuning sPLSDA models, only two rounds of optimisation were done. Refining the number of selected features further would likely have improved model performance to a non-negligible degree. 
+- *Use of different ML models.* The models utilised from the `mixOmics` package, while very powerful, are limited in some regards. In the past few years, more comprehensive and modular approaches have been developed for this type of low-sample-size data. I believe this approaches would be interesting to use
+- *Use of continuous outcome variables.* While Patrick and I discussed the difficulty in using the per-artery, continuous variables as our outcome(s) of interest, I do think future study should direct some attention to this aspect. The (somewhat) arbitrary threshold distinguishing the `CAD` vs `no CAD` groups definitely played a role in the groups consistent releatedness and overlap in latent space. 
+  - For example, a sample with a phenotype consistent with 65% CAD risk was placed in the `no CAD` group due to the 70% threshold. This would have certainly impaired model accuracy. 
+
+While most aspects of the experimental design were well thought out, I believe that this downstream analysis was not really regarded when designing this experiment. Aspects of that experimental design which made this analysis less effective than possible were:
+
+- *Minimal sample size.* While this is an obvious one, a sample size of 70 means that any model trained on that data will be significantly impacted by outliers - of which there were multiple.
+- *Lack of validation set.* This is somewhat related to the previous point, but there being no proper validation set meant that the small sample size was further compounded when some of them were set aside for validation.

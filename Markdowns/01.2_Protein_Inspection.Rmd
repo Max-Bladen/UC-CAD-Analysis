@@ -1,0 +1,114 @@
+---
+title: "01.2_Protein_Inspection"
+output: 
+  html_document
+date: "2023-09-23"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Read in data
+
+In terms of the proteins, we have the one data frame:
+
+- `CADvsNoCAD.xlsx`:
+  - Excel spread sheet with 3 sheets. Contains protein and peptide quantification, as well as preliminary differential expression analysis on the proteins.
+  
+For now, we will ignore the differential expression and peptide dataframes and just work with the protein quantification dataframe.
+
+``` {r}
+# Only extract first sheet of spreadsheet
+proteinQuantSheetIdx <- 1
+
+# Read in data
+proteinResultsRaw <- paste0(wd, "Data/CADvsNOCAD.xlsx") %>% 
+  read_xlsx(sheet = proteinQuantSheetIdx) %>% 
+  as.data.table()
+```
+
+# Explore features 
+
+First, we'll check for duplicate features, of which there are none:
+
+``` {r}
+# Extract protein names
+featureNames <- proteinResultsRaw$Protein
+
+length(featureNames) == length(unique(featureNames))
+```
+
+Then we can check that all the accession protein IDs are unique:
+
+``` {r}
+# Extract the accession IDs for protein
+accessionIDs <- featureNames %>% lapply(function(name) {
+  strsplit(name, split="|", fixed=T)[[1]][2]
+}) %>% unlist()
+
+length(accessionIDs) == length(unique(accessionIDs))
+```
+
+Also, we can check the protein names are all unique too:
+
+``` {r}
+# Extract protein names
+proteinNames <- featureNames %>% lapply(function(name) {
+  strsplit(name, split="|", fixed=T)[[1]][3]
+}) %>% unlist()
+
+length(proteinNames) == length(unique(proteinNames))
+```
+
+
+
+
+# Explore fragment count
+
+We can create a plot showing the distribution of fragment count values:
+
+``` {r}
+# Find maximum value
+maxFragmentCount <- max(proteinResultsRaw$nFragment)
+# Count frequency of each fragment length
+fragmentTable <- Full.Table(proteinResultsRaw$nFragment, 
+                           1:maxFragmentCount)
+# Create plotting dataframe
+plotDF <- as.data.table(as.matrix(fragmentTable))
+colnames(plotDF) <- "quantity"
+plotDF$counts <- as.numeric(names(fragmentTable))
+
+plotDF %>% ggplot(aes(x=counts, y=quantity)) + 
+  geom_line() + 
+  theme_bw() + 
+  xlab("Fragment count") + 
+  ylab("Protein quantity")
+```
+
+
+
+
+# Explore peptide count
+
+We can create a plot showing the distribution of peptide count values:
+
+``` {r}
+# Find maximum value
+maxPeptideCount <- max(proteinResultsRaw$nPeptide)
+# Count frequency of each piptide count
+peptideTable <- Full.Table(proteinResultsRaw$nPeptide, 
+                           1:maxPeptideCount)
+# Create plotting dataframe
+plotDF <- as.data.table(as.matrix(peptideTable))
+colnames(plotDF) <- "quantity"
+plotDF$counts <- as.numeric(names(peptideTable))
+
+plotDF %>% ggplot(aes(x=counts, y=quantity)) + 
+  geom_line() + 
+  theme_bw() + 
+  xlab("Peptide count") + 
+  ylab("Protein quantity")
+```

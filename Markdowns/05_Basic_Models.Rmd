@@ -1,0 +1,147 @@
+---
+title: "05_Basic_Models"
+output: html_document
+date: "2023-09-24"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Load data container
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/all_data.rds"))
+```
+
+# Single-omics models
+
+A good starting place in model building is to create the simplest and most naive forms of the models. *"Single-omic"* refers to using each of our two dataframes independently. This not only allows us to make some inferences about the data, but also have a baseline with which to compare more complex and/or involved models. 
+
+## Unsupervised
+
+Therefore, we will start with *single-omic, unsupervised* models. *"Unsupervised"* refers to a model building type where it is not given the outcome variable. Therefore any trends it makes are totally agnostic of the CAD grouping of each sample. 
+
+Of note here are the explained variances across each component. In both datasets, the first component (x-axis) captures a vast majority of variance, while the second component (y-axis) only captures a fraction. In the protein dataset, we see the `noCAD_115` and `noCAD_272` samples' signals overshadowing any signals between the two groups. These were the two samples which clustering very different from all other samples in the protein, sample heatmap in `04_Exploration.Rmd`. In both datasets, virtually all samples, irrespective of group, are clustering together.
+
+The age, race and sex variables don't seem to be playing a role in these PCAs (supplementary figures 1 & 2) which is encouraging to see at least. 
+
+``` {r}
+lipidPCA <- pca(data$dfs$lipids,
+                scale=T)
+
+plotIndiv(lipidPCA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Basic lipid PCA",
+          col = Group.Palette)
+
+
+proteinPCA <- pca(data$dfs$proteins,
+                scale=T)
+
+plotIndiv(proteinPCA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Basic protein PCA",
+          col = Group.Palette)
+```
+
+
+
+
+## Supervised
+
+Next, we will try informing our single omic models of the sample groups (ie. *"supervised"*) to see if that is able to improve group distinction. As can be seen, particularly in the case of the protein data, group separation, while not perfect, is significantly better. As with the PCAs, there is no obvious trend with the groups and the age, sex and race variables (see Supplementary Figures 3 & 4).
+
+``` {r} 
+lipidPLSDA <- plsda(data$dfs$lipids,
+                  data$samples$group,
+                scale=T)
+
+plotIndiv(lipidPLSDA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Basic lipid PLSDA",
+          col = Group.Palette)
+
+proteinPLSDA <- plsda(data$dfs$proteins,
+                  data$samples$group,
+                scale=T)
+
+plotIndiv(proteinPLSDA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Basic protein PLSDA",
+          col = Group.Palette)
+```
+
+# Mutli-omic
+
+Now we can start integrating these two datasets. We use the `"canonical"` mode of the PLS algorithm such that variates are calculated in a symmetric manner. Given the results of our PCA and PLSDA models, it is unsurprising that PLS (in this context, unsupervised) does not separate our groups very well. Interestingly, the same samples seen dispersing in PCA and PLSDA (namely: `noCAD_115`, `noCAD_272`, `noCAD_606` & `noCAD_1125`). 
+
+``` {r}
+lipidProteinPLS <- pls(data$dfs$lipids,
+                       data$dfs$proteins,
+                       mode = "canonical")
+
+plotIndiv(lipidProteinPLS,
+          rep.space = "XY-variate",
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Basic lipid-protein PLS",
+          col = Group.Palette)
+
+```
+
+Note: for the below correlation circle plot, `X` is referring to lipids and `Y` is referring to If we look at the correlation
+
+``` {r}
+plotVar(lipidProteinPLS, 
+        cutoff = 0.5, 
+        var.names = FALSE,
+        legend = T,
+        pch = c(16, 17),
+        col = Block.Palette)
+```
+
+## Supervised
+
+Lastly, we'll use both lipid and protein datasets simultaneously in a supervised model, predicting the outcome variable. The model produced here is quite lackluster, such that the sample groups are clustering together across both datasets. This indicates that there is still large amounts of noise in the system which we will be needing to remove.
+
+```{r}
+lipidProteinPLSDA <- block.plsda(list(Lipids = data$dfs$lipids,
+                                      Proteins = data$dfs$proteins),
+                                 data$samples$group)
+
+plotIndiv(lipidProteinPLSDA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Basic multi-block PLSDA",
+          col = Group.Palette)
+```
+
+Interestingly, the features cluster well within each dataset when looking at their correlation to the first and second components. While there is still noise, it seems that there is a large degree of orthogonality to our two datasets which is very encouraging to see.
+
+``` {r}
+plotVar(lipidProteinPLSDA, 
+        cutoff = 0.5, 
+        var.names = FALSE,
+        legend = T,
+        pch = c(16, 17),
+        col = Block.Palette)
+```

@@ -1,0 +1,467 @@
+---
+title: "07_Model_Building"
+output: 
+  html_document:
+    code_folding: show
+date: "2023-10-07"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Load data container
+
+``` {r}
+data <- readRDS(paste0(wd, "RDS/Data_Objects/engineered_data.rds"))
+```
+
+
+# Model exploration
+
+Now that we have explored feature selection and engineering, we can move onto buiding our final classifier. 
+
+## Single-omic PLSDAs
+
+However, first its a good first step to run the same basic analyses as is `05_Basic_Models` to see how effective our feature processing was. PCA models' plots can be found in Supplementary Figures 9, 10 & 11. For both the lipid and protein datasets, the sample groups, while not perfectly separated, and being discriminated particuarly along the first component. 
+
+```{r}
+lipidPLSDA <- plsda(data$dfs$lipids,
+                  data$samples$group,
+                scale=T)
+
+plotIndiv(lipidPLSDA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Filtered lipid PLSDA",
+          col = Group.Palette)
+```
+
+```{r}
+proteinPLSDA <- plsda(data$dfs$proteins,
+                  data$samples$group,
+                scale=T)
+
+plotIndiv(proteinPLSDA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Filtered protein PLSDA",
+          col = Group.Palette)
+```
+
+This is the same plot that can be found at the end of `06_Feature_Processing`, after the engineered features have been selected. We can once again see the clean decision boundary formed along the first and second component.
+
+```{r}
+engineeredPLSDA <- plsda(data$dfs$engineered,
+                  data$samples$group,
+                scale=T)
+
+plotIndiv(engineeredPLSDA,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Engineered PLSDA",
+          col = Group.Palette)
+```
+
+
+## Multi-omic PLSDA:
+
+While we removed the most highly intercorrelated features, there is still a degree of relation between our features, particuarly with the engineered features. Therefore, we set our design matrix to have values of 0.1 to maximise discriminative ability (read more [here](http://mixomics.org/methods/n-integration-methods/)).
+
+```{r}
+# Set entire matrix to 0.1
+design = matrix(0.1, 
+                ncol = length(data$dfs), 
+                nrow = length(data$dfs), 
+                dimnames = list(names(data$dfs), names(data$dfs)))
+# Set diagonal to 0s
+diag(design) = 0 
+
+design
+```
+
+We can see the clustering of samples across the variates on the three datasets (lipid, protein and engineered features). The engineered features are providing the strongest degree of separation
+
+```{r}
+basicDiabloModel <- block.plsda(X = data$dfs, 
+                                Y = data$samples$group,
+                                data$samples$group,
+                                design=design,
+                                scale=T,
+                                ncomp=10)
+
+plotIndiv(basicDiabloModel,
+          ind.names= data$samples$names,
+          #rep.space = "X-variate",
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Filtered multi-block PLSDA",
+          col = Group.Palette,
+          ellipse = T)
+
+plotVar(basicDiabloModel, 
+        cutoff = 0.5, 
+        var.names = FALSE,
+        legend = T,
+        pch = c(16, 17, 18),
+        col = Block.Palette.Extra)
+```
+
+# Generating the final model
+
+## Generating validation set:
+
+First, we are going to set aside 16 samples (8 from each class) as our validation set:
+
+``` {r}
+# Randomly selected via `sample` function until 8 from each group were selected
+validationIdx <- c(4, 17, 50, 64, 70, 27, 46, 42,  
+                   8, 41, 24,  2,  5, 14, 51, 37)
+
+# Separate training/testing data from the validation set
+separatedData <- Extract_Data_Subset(data, validationIdx)
+
+# Update objects
+data <- separatedData$oldData
+validationData <- separatedData$newData
+
+rm(separatedData) # Clean up
+
+saveRDS(data, paste0(wd, "RDS/Data_Objects/final_data.rds"))
+saveRDS(validationData, paste0(wd, "RDS/Data_Objects/validation_data.rds"))
+```
+
+## Create initial basic model
+
+``` {r}
+initialModel <- block.plsda(X = data$dfs, 
+                                Y = data$samples$group,
+                                design=design,
+                                scale=T,
+                                ncomp=10)
+```
+
+
+## Optimising component count
+
+In our case, the error rate (`ER`) and the balanced error rate (`BER`) are more or less equivalent due to the balanced nature of our sample groups. In order to select which distance metric to use (`max.dist`, `centroids.dist` & `mahalanobis.dist`) you can read more [here](http://mixomics.org/methods/distance-metrics/). Given the relatedness of our datasets, the `mahalanobis.dist` will likely be the most appropriate. 
+
+```{r}
+# Set random seed for reproducibility
+set.seed(1901)
+# Evaluate performance given different numbers of components
+initialModelPerf <- perf(initialModel,
+                             validation = 'Mfold',
+                             folds = 10, nrepeat = 10,
+                             cpus = snowWorkers())
+
+plot(initialModelPerf)
+```
+
+The plot indicates that a component count of 2 will be optimal, such that the ER is minimised. Adding more components seems to reduce the overall efficacy of the model, likely by adding unnecessary noise to the system.
+
+```{r}
+ncomp <- 2
+```
+
+## Optimising feature count
+
+We will use the `mixOmics` tuning methodology to determine the optimal number of features for a PLSDA model to discriminate our sample groups. First we provide it with a set of feature counts on each dataframe to evaluate. Then we pass this information to the `tune` function. 
+
+While we have filtered and engineered features in a data driven manner, this has been outside the context of a PLSDA model. Even though we have significantly less features than what we started with, there still may be data in these three dataframes (ie "blocks"; lipids, proteins and engineered) which can be considered noise or may lead to suboptimal model performance. 
+
+The basic methodology here is that:
+
+- For each component:
+  - For each combination of `testKeepX` values across dataframes
+    - Slice samples into `folds` folds (ie this case, 10)
+    - Iteratively, use set aside one of these folds. Train on the remaining nine.
+    - Evaluate model on last (testing) fold
+    - Extract balance error rate
+  - Repeat `nrepeat` times (in this case, 25)
+  - Average across the repeats and select optimal combination of feature counts for that component
+  
+*Note: the below code block is not run when compiling this report as it can take upwards of 10hrs to complete. The final `keepX` variable is loaded from `RDS/Tuning/diablo_tuning.rds` to save time.*
+
+
+```{r, eval = FALSE}
+# Set up vectors of feature counts to test
+testKeepX = list(lipids = seq(5, ncol(data$dfs$lipids), 5),
+                 proteins = seq(5, ncol(data$dfs$proteins), 5),
+                 engineered = seq(5, ncol(data$dfs$engineered), 5))
+
+# Run tuning algorithm (takes very long time)
+initialModelTune = tune.block.splsda(X = data$dfs,
+                                         Y = data$samples$group,
+                                         ncomp = ncomp,
+                                         test.keepX = testKeepX,
+                                         design = design,
+                                         validation = 'Mfold',
+                                         folds = 10, nrepeat = 25,
+                                         dist = "mahalanobis.dist",
+                                         BPPARAM = SnowParam(snowWorkers())) %>%
+  suppressMessages()
+
+keepX <- initialModelTune$choice.keepX
+```
+
+``` {r, echo = FALSE} 
+testKeepX = list(lipids = seq(5, ncol(data$dfs$lipids), 5), 
+                 proteins = seq(5, ncol(data$dfs$proteins), 5), 
+                 engineered = seq(5, ncol(data$dfs$engineered), 5))
+
+keepX <- readRDS(paste0(wd, "RDS/Tuning/diablo_tuning.rds"))$choice.keepX
+```
+
+You can see below the optimal number of features for each of our two components on each of our blocks: 
+
+``` {r}
+keepX
+```
+
+Then, using this optimised number of features we can generate a final model!
+
+```{r}
+model <- block.splsda(X = data$dfs, 
+                      Y = data$samples$group,
+                      ncomp = ncomp, 
+                      keepX = keepX,
+                      design = design)
+
+saveRDS(model, paste0(wd, "RDS/final_model.rds"))
+```
+
+## AUROC Evaluation
+
+Below we can see the AUROC curve generated by the model when evaluated *on the samples it was trained on*. Hence, these plots to not represent the true performance of the model, but give us a benchmark to compare the validation results again. 
+
+Overall, the model balances specificity and sensitivity across the three blocks quite well. The extremely high AUC value of the engineered features is interesting, but should not be taken at face value. The equivalent plots using only the first component (Supp. Figures 11-13) suggest that the first component is the primary variate in terms of sample group discrimination. 
+
+
+``` {r, results="hide", out.width = "75%"}
+auroc(model, roc.comp = 2, roc.block = 1)
+auroc(model, roc.comp = 2, roc.block = 2)
+auroc(model, roc.comp = 2, roc.block = 3)
+```
+
+## Sample projection plot
+
+We can see the clustering of our samples across the three blocks below. As we have noted before, the engineered features provide us with the strongest delineation between groups and this is driven by the first component. The CAD and no CAD groups' 95% confidence ellipses have minimal overlap which is encouraging to see.  With more time, this would be worth exploring and refining. The proteins alone perform reasonably well, with a combination of both components facilitating a non-perfect, yet still decently discrimniating, decision boundary. The lipids perform the worst with the vast majority of CAD samples falling within the no CAD confidence ellipse. The second component of the lipid and engineered blocks seems to mainly be driven by a small number of outlier samples.
+
+
+``` {r}
+plotIndiv(model,
+          ind.names= data$samples$names,
+          group = data$samples$group,
+          legend = TRUE, 
+          legend.title = 'Group',
+          title = "Refined multi-block PLSDA",
+          col = Group.Palette,
+          ellipse = T)
+```
+
+We are primarily concerned with the composition of the first component as it seems to play a much more integral role that the second component. Below depicts the "loading" values (ie. contribution) of the top input features on each block to the first component (equivalent plot for second component can be found in Supp. Figure 14). The colouring of this plot indicates which group had the maximum median on that feature. This can be interpreted as a given feature being more integral to "defining" a given group's projection on that component. 
+
+For the lipids, the only major contributor is the `PE(18:0/18:0)` feature. 
+
+In regards to the proteins, all but one of the top 20 features can be seen to be driving the CAD group as opposed to the no CAD group. Proteins with the strongest contribution to the CAD group were `SEPP1`, `NAMPT`, `CO2` and `C1R`. The no CAD group was diven in large part by the `IQGA2` protein.
+
+Arguably the most interesting of these three block is the engineered features. Here we see the largest contributors defining the no CAD group, but with some also driving the CAD group. A more comprehensive breakdown of these engineered features can be seen below this loading plot.
+
+```{r}
+# Annoyingly cannot change colours of this function to match colour used for groups above
+loadings <- plotLoadings(model, 
+                         comp = 1, 
+                         contrib = 'max', 
+                         method = 'median',
+                         ndisplay = 20) %>% suppressMessages()
+```
+We can see a breakdown of the engineered features below, ordered based on their loading values. Recurring lipids in these important engineered features are `CER(22:0)`, `DAG(18:1/20:5)`, `TAG51:5-FA18:2` and `TAG56:1-FA18:1`. Recurring proteins are `APMAP`, `CERU` and `GLU2B`. The fast majority of these features are *factor* features rather than *ratio* features interestingly. This suggests that the factor features are capturing more information than the ratio features, but may also be partially a result of their increased variability, allowing the model to separate our sample groups to a better degree. 
+
+The one protein which was in this top set of protein and engineered features was `CERU`. Three lipids found in these top component 1 features were used as part of the top engineered features; namely `DAG(18:1/20:5)`, `CE(20:5)` and `TAG58:3-FA18:1`
+
+```{r}
+# Combine all three properties of engineered features into single character
+data$features$engineered$names <- paste0(data$features$engineered$lipid, "_", 
+                                         data$features$engineered$protein, "_", 
+                                         data$features$engineered$method)
+
+# Extract top 20 engineered features based on their loadings
+engineeredLoadings <- Sort_Loadings(model, 3, 1)[1:20]
+
+# Find where these features are
+engineeredFeatures <- data$features$engineered[data$features$engineered$names 
+                                               %in% names(engineeredLoadings),] 
+
+# Match the orders
+engineeredFeatures <- engineeredFeatures[match(names(engineeredLoadings),
+                                               engineeredFeatures$names),]
+
+# Remove the `name` column and add the loading value
+engineeredFeatures <- cbind(engineeredFeatures[,-4], loading = engineeredLoadings)
+
+# Print
+engineeredFeatures
+```
+
+Looking at the correlation circle plot below, we can see a strong clustering of the proteins features with one another (negatively correlated with component 1). This supports what we see in the projection and loading plots above, such that these proteins seem to be strongly defining the CAD group specifically. This suggests these may be key biomarkers in distinguishing high-risk CAD samples. 
+
+The lipids struggled to distinguish groups, but clustered with the engineered features which were able to distinguish groups. This can be interpreted as the lipid features modulating the protein features to generate novel information about this biological system. 
+
+Note: the minimum correlation needed for this plot is 0.5, so the vast majority of the used features are not depicted in this figure. 
+
+
+```{r}
+plotVar(model, 
+        cutoff = 0.5, 
+        var.names = FALSE,
+        legend = T,
+        pch = c(16, 17, 18),
+        col = Block.Palette.Extra)
+```
+
+Lastly, we can look at how all these input features relate to one another. In this plot, we are more interested in trends across and between the blocks rather than individual features. The protein features *only* have negative correlation with other features while the engineered features had mostly positive correlations with the proteins and lipids. The lipids themselves have a combination of positive and negative correlations. 
+
+The proportion of strong correlations from and with the protein and lipid features suggest that the set of proteins/lipids we would be interested in is a small subset of what was used for this model. 
+
+Note: the minimum correlation needed for this plot is 0.5, so the vast majority of pairwise correlations are not depicted in this figure. 
+
+```{r}
+circosPlot(model, 
+        cutoff = 0.5, 
+        legend = T,
+        color.blocks = Block.Palette.Extra)
+```
+
+## Model validation
+
+The penultimate step as part of our model building is validating it as a predictor on some novel samples. Earlier on is this specific report, we set aside 16 samples as our validation set.
+
+*Note: In this context, the CAD group is treated as our "positive" group.*
+
+We use the model we tuned and evaluated to predict on these novel samples from the validation set (these samples were not involved in any step of the model construction phase). We can see that this model was very competent at predicting the no CAD group but were less effective at predicting the CAD group.
+
+```{r}
+modelPredict = predict(model, 
+                       newdata = validationData$dfs)
+
+confMat <- get.confusion_matrix(truth = validationData$samples$group,
+                     predicted = modelPredict$WeightedVote$mahalanobis.dist[,2])
+
+confMat
+```
+
+Some prediction metrics can be seen below. The high specificity shows our model's ability to correctly identify our "negative" no CAD group, but the NPV shows that it struggled with over-classifying samples into the no CAD group. The model is more conservative when making CAD classifications, shown by its PPV. However, it struggled to find information in this dataset to properly define the CAD group.
+
+``` {r}
+Extract_Confusion_Metrics(confMat) %>% unlist() %>% round(1)
+```
+The overall error rate of the model (below) is really encouraging to see. It suggests that there really is information which exists in this dataset to aid in identifying high risk patients.
+
+```{r}
+get.BER(confMat)
+```
+
+
+## Comparison to other models
+
+We will undergo a similar validation process using two different permutations of our data: the first removing the engineered features (ie. just lipids and proteins) and the second also removing the lipids (ie. just using the proteins). In our discussions (and from my analysis), it seems the protein dataset is the more clinically viable to assay and discriminatory of our groups. Ultimately, these comparisons can suggest to us how much additional information is afforded by the integrative approach taken (using proteins and lipids). It can also indicate the necessity of assay lipids in future study.
+
+*Note: for these reduced models, we will use the same number of components (2) and the same number of features per block, per component as the optimised model above.*
+
+### No engineered features
+
+Loss of the engineered features lowers the classification ability of our model. The number of CAD samples predicted as no CAD increased from 3 to 5, lowering the NPV and specificity, but leaving the sensitivity and PPV unaffected (as none of the no CAD samples were classified as CAD). 
+
+This suggests that modulating the protein concentrations with lipid concentrations facilitates accurate distinction of the CAD group. The increase of the error rate from ~18% to 31% is a marked one and indicates that
+
+```{r}
+lipidProteinModel <- block.splsda(data$dfs[1:2],
+                       data$samples$group,
+                      ncomp = ncomp, 
+                      keepX = keepX[1:2],
+                      design = 0.1)
+
+lipidProteinModelPredict = predict(lipidProteinModel, 
+                       newdata = validationData$dfs[1:2])
+
+confMat <- get.confusion_matrix(truth = validationData$samples$group,
+                     predicted = lipidProteinModelPredict$WeightedVote$mahalanobis.dist[,2])
+
+confMat
+```
+
+``` {r}
+Extract_Confusion_Metrics(confMat) %>% unlist() %>% round(1)
+```
+
+```{r}
+get.BER(confMat)
+```
+
+### Only proteins
+
+This model's performance is is unsurprisingly worse than either of the integrative models. The reduction in group distinction is fairly nominal when compared to use of the protein and lipid datasets (but not the engineered features). While the addition of the lipid assay aids the model, with an increased sample size, the protein assay may be sufficient on its own for future study of high-CAD-risk diabetes patients. 
+
+```{r}
+proteinModel <- splsda(data$dfs$proteins,
+                       data$samples$group,
+                      ncomp = ncomp, 
+                      keepX = keepX$proteins)
+```
+
+```{r}
+proteinModelPredict = predict(proteinModel, 
+                       newdata = validationData$dfs$proteins)
+
+confMat <- get.confusion_matrix(truth = validationData$samples$group,
+                     predicted = proteinModelPredict$MajorityVote$mahalanobis.dist[,2])
+
+confMat
+```
+
+``` {r}
+Extract_Confusion_Metrics(confMat) %>% unlist() %>% round(1)
+```
+
+```{r}
+get.BER(confMat)
+```
+
+### Only lipids
+
+This last model, using only the lipid dataset, has some surprising results. The sensitivity, NPV and BER all improved when compared to the protein-only model - though the specificity and PPV did both take significant hits. What we can see here is that use of the lipids in a model led to a much greater proportion of samples being classified as CAD samples, to the betterment and detriment of the predictive performance of the model. 
+
+```{r}
+lipidModel <- splsda(data$dfs$lipids,
+                       data$samples$group,
+                      ncomp = ncomp, 
+                      keepX = keepX$lipids)
+```
+
+```{r}
+lipidModelPredict = predict(lipidModel, 
+                       newdata = validationData$dfs$lipids)
+
+confMat <- get.confusion_matrix(truth = validationData$samples$group,
+                     predicted = lipidModelPredict$MajorityVote$mahalanobis.dist[,2])
+
+confMat
+```
+
+``` {r}
+Extract_Confusion_Metrics(confMat) %>% unlist() %>% round(1)
+```
+
+```{r}
+get.BER(confMat)
+```

@@ -1,0 +1,157 @@
+---
+title: "01.1_Lipid_Inspection"
+output: 
+  html_document
+date: "2023-09-23"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Read in data
+
+In terms of the lipids, we have the following data frames:
+
+- `1E19_DonaldLynch_Batch1_Results.xlsx`:
+  - Excel spread sheet with 6 sheets. For the samples in batch 1, contains the concentrations and compositions of lipids, lipid classes and fatty acids - each on a separate sheet.
+- `1E19_DonaldLynch_Batch2_Results.xlsx`:
+  - Excel spread sheet with 6 sheets. For the samples in batch 2, contains the concentrations and compositions of lipids, lipid classes and fatty acids - each on a separate sheet.
+- `1E18_DonaldLynch_All_Results.csv`:
+  - Comma separated spreadsheet. For samples from both batches, contains the concentrations and compositions of lipids, lipid classes and fatty acids in a single sheet.
+  
+Ideally, we would just use the `AllResults` data set. Additionally, as per my discussion with Patrick (19/09/2023), we are only interested in the *lipid concentration* features. Therefore, until later the only features that will be explored and used are these. 
+
+``` {r}
+# Only extract first sheet of spreadsheet
+lipidConcSheetIdx <- 1
+ 
+# Read in batch 1 data
+batch1ResultsRaw <- paste0(wd, "Data/1E19_DonaldLynch_Batch1_Results.xlsx") %>% 
+  read_xlsx(sheet = lipidConcSheetIdx) %>% 
+  as.data.table()
+
+# Read in batch 2 data
+batch2ResultsRaw <- paste0(wd, "Data/1E19_DonaldLynch_Batch2_Results.xlsx") %>% 
+  read_xlsx(sheet = lipidConcSheetIdx) %>% 
+  as.data.table()
+
+# Read in combined  data
+allResultsRaw <- paste0(wd, "Data/1E18_DonaldLynch_All_Results.csv") %>% 
+  read.csv() %>% 
+  as.data.table()
+```
+
+First, lets have a look at the `type` and `level` rows of the `allResultsRaw` dataframe:
+
+``` {r}
+# Extract meta rows
+type <- (allResultsRaw[4,,drop=T] %>% unname() %>% unlist())
+level <- (allResultsRaw[1,drop=T] %>% unname() %>% unlist())
+# Count unique items
+table(type); table(level);
+```
+
+We can see that there are 28 more features corresponding to the composition type (`n`) compared to the concentration type (`q`). These all correspond to *"Total"* fatty acid columns, which are not being used. Therefore this inconsistency is not a concern.
+
+``` {r}
+# Extract only concentration features
+featureNames <- as.vector(as.matrix(allResultsRaw[allResultsRaw$Key=="Name",]))
+concFeatureNames <- featureNames[type=="q"]
+compFeatureNames <- featureNames[type=="n"]
+
+compFeatureNames[compFeatureNames %!in% concFeatureNames]
+```
+
+The `allResultsRaw` dataframe will contain the 5 data sets which we are not interested in (lipid classes & fatty acids; compositions). Hence, we will slice this data frame:
+
+``` {r}
+colsToRemove <- c(1,2,3) # Key, Matrix, UOM columns
+
+# Extract meta rows
+type <- type[-colsToRemove]
+level <- level[-colsToRemove]
+
+# Slice data to contain only moleuclar species concentration features
+featuresToRetain <- type == "q" & level == "Molecular Species"
+allResults <- allResultsRaw[,featuresToRetain, with=F]
+```
+
+
+
+
+
+# Explore features across data frames
+
+Now that each of the datasets contain the equivalent information, we can explore how the datasets agree in terms of which features that they contain:
+
+``` {r}
+# Extract feature names from all three datasets
+batch1FeatureNames <- colnames(batch1ResultsRaw)
+batch2FeatureNames <- colnames(batch2ResultsRaw)
+allFeatureNames <- unname(unlist(as.vector(allResults[allResults$Key=="Name",])))
+```
+
+All but three features from `batch1ResultsRaw` and `batch2ResultsRaw` are found in `allResults`, and the three missing features in `allResults` is the same for `batch1ResultsRaw` and `batch2ResultsRaw`:
+
+``` {r}
+# Extract which features are not found in both batch specific datasets
+batch1FeatureNames[batch1FeatureNames %!in% allFeatureNames]
+batch2FeatureNames[batch2FeatureNames %!in% allFeatureNames]
+```
+
+There are 24 features from `batch2ResultsRaw` which are not contained in `batch1ResultsRaw`:
+
+``` {r}
+batch2FeatureNames[batch2FeatureNames %!in% batch1FeatureNames]
+```
+
+Additionally, there are 9 features from `batch1ResultsRaw` which are not contained in `batch2ResultsRaw`:
+
+``` {r}
+batch1FeatureNames[batch1FeatureNames %!in% batch2FeatureNames]
+```
+
+No duplicate features in any data frame:
+
+``` {r}
+length(unique(batch1FeatureNames)) == length(batch1FeatureNames)
+length(unique(batch2FeatureNames)) == length(batch2FeatureNames)
+length(unique(allFeatureNames[-colsToRemove])) == length(allFeatureNames[-colsToRemove])
+```
+
+
+# Explore samples across data frames
+
+``` {r}
+rowsToRemove <- c(1,2,3,4) # Level, Class, Name, DataType
+
+# Extract sample names form three datasets
+batch1SampleNames <- batch1ResultsRaw$Name
+batch2SampleNames <- batch2ResultsRaw$Name
+allSampleNames <- as.vector(as.matrix(allResults[,1]))[-rowsToRemove]
+```
+
+All samples from `batch1ResultsRaw` and `batch2ResultsRaw` are found in `allResults`:
+
+``` {r}
+# Extract which samples are not found in both batch specific datasets
+batch1SampleNames[batch1SampleNames %!in% allSampleNames]
+batch2SampleNames[batch2SampleNames %!in% allSampleNames]
+```
+
+No samples found in both `batch1ResultsRaw` and `batch2ResultsRaw`:
+
+``` {r}
+intersect(batch1SampleNames, batch2SampleNames)
+```
+
+No duplicate samples in any data frame
+
+``` {r}
+length(unique(batch1SampleNames)) == length(batch1SampleNames)
+length(unique(batch2SampleNames)) == length(batch2SampleNames)
+length(unique(allSampleNames)) == length(allSampleNames)
+```

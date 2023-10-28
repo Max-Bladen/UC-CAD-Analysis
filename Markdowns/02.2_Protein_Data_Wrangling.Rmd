@@ -1,0 +1,169 @@
+---
+title: "02.2_Protein_Data_Wrangling"
+output: 
+  html_document
+date: "2023-09-23"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Read in data
+
+``` {r}
+# Only want to look at the first sheet of the spreadsheet
+proteinQuantSheetIdx <- 1
+
+# Read ind data from spreadsheet
+df <- paste0(wd, "Data/CADvsNOCAD.xlsx") %>% 
+  read_xlsx(sheet = proteinQuantSheetIdx) %>% 
+  as.data.table()
+```
+
+Checking the protein data frame for missing values indicates that there are no missing values. These seem to have been filled in with `0`. 
+
+``` {r}
+# Check if there are any missing values, encoded as '.' (as with lipids) or NA
+sum(df == ".")
+sum(is.na(df))
+```
+
+However, there is about 18% of the data that are equal to 0:
+
+``` {r}
+sum(df == 0)/(nrow(df) * ncol(df)) * 100
+```
+
+
+# Reformatting data
+
+In order to reduce our protein dataframe down to purely protein quantities, we need to extract the protein name, fragment count and peptide count columns. We then remove these columns and transpose the data frame (so samples are rows and features as columns):
+
+``` {r}
+# Extract column names, minus the three we don't need to track
+sampleNames <- colnames(df)[colnames(df) %!in% c("Protein", "nFragment", "nPeptide")]
+# Extract these meta features
+proteinNames <- df$Protein
+nFragments <- df$nFragment
+nPeptides <- df$nPeptide
+
+# Slice dataframe to remove these three features and transpose
+df <- df[,colnames(df) %!in% c("Protein", "nFragment", "nPeptide"), with=F] %>% 
+  t() %>% as.data.table()
+
+# Set column names to extract protein names
+colnames(df) <- proteinNames
+```
+
+
+# Sample filtering
+
+Note: unlike the lipid dataframe, there are no `Blank` or `QC` sample rows in this dataframe, and therefore do not need to be removed.
+
+## Per-sample zero-value proportions
+
+While there are no missing values in the protein dataframe, there is a large portion of zeroes. Hence, it is good to check what the distribution of these zeroes is. By iterating over each sample, we calculate the proportion of values which are zero. It is good to see that the two sample groups have virtually equal zero-proportion distributions. All but three samples have less than 25% of their values as 0:
+
+``` {r}
+# Iterate over each samples, calculating the proportion of values which are missing
+sampleZeroProp <- df %>% apply(1, function(s) { sum(s==0)/length(s) } ) %>% unlist()
+
+# Creating plotting dataframe
+plotDF <- data.frame(class = Sample_to_Group(sampleNames),
+                     zeroProp = sampleZeroProp) %>% as.data.table()
+
+plotDF %>% ggplot(aes(x = zeroProp, y = class,
+                      group = class, fill = class)) +
+  geom_boxplot() + 
+  theme_bw() + 
+  scale_fill_manual(name = "Class",
+                      values = Palette(2)) +
+  theme(legend.position = "none") +
+  xlab("Zero-value proportion") + 
+  ylab("Sample group")
+```
+
+These three samples are:
+
+``` {r}
+sampleNames[sampleZeroProp > 0.25]
+```
+
+We will leave these samples in the dataframe for now, but we should keep these three samples in mind as we go forward with analysis
+
+
+
+
+# Feature filtering
+
+## Per-feature zero-value proportions
+
+By iterating over each feature, we calculate the proportion of values which are zero. Below you can see that some features have over 60% zeroes, which is not particularly useful:
+
+``` {r}
+# Iterate over each feature, calculating the proportion of values which are missing
+featureZeroProp <- df %>% apply(2, function(s) { sum(s==0)/length(s) } ) %>% unlist()
+
+# Create plotting and labelling dataframe
+plotDF <- data.frame(zeroProp = unname(featureZeroProp)) %>% as.data.table()
+
+plotDF %>% ggplot(aes(x = zeroProp)) +
+  geom_boxplot(fill = "#6699CC") + 
+  theme_bw() + 
+  xlab("Zero-value proportion") + 
+  theme(axis.text.y = element_blank())
+```
+
+The proteins which have more than 50% zeroes are:
+
+``` {r}
+colnames(df)[featureZeroProp > 0.5]
+```
+
+As with the samples with many zeroes, these will be left in the dataset for now. If these features come up in downstream analysis, their importance should be taken skeptically.
+
+
+
+## Ensure data is numeric
+
+Sometimes data can be represented as characters (ie. `"0.5"`). We want these values stored as numerics (ie. `0.5`), so we will coerce them in a column-wise fashion:
+
+```{r}
+# Coerce all features into numerics
+df <- df %>% lapply(as.numeric) %>% as.data.table()
+```
+
+
+
+## Centering data
+
+Downstream exploration indicated that the lipid features required centering. In order to preserve the unique variance of each feature, we won't scale the data yet.
+
+```{r}
+# Note: scale is set to FALSE here so variance is retained
+df <- df %>% scale(center = T,
+                   scale = F) %>% as.data.table()
+```
+
+
+# Save cleaned data frame
+
+Now we are left with a protein data frame with 70 samples (all `CAD` and `noCAD`) and 247 features:
+
+```{r}
+dim(df)
+```
+
+We can save this to an `.rds` object so we can open it up in downstream scripts. First, we will add the fragments and the peptides variables, as well as the sample names to a list with the dataframe:
+
+``` {r}
+obj <- list(df = df,
+            sampleNames = sampleNames,
+            peptideCounts = nPeptides,
+            fragmentCoutns = nFragments)
+
+obj %>% saveRDS(paste0(wd, "RDS/Data_Objects/cleaned_protein_data.rds"))
+```

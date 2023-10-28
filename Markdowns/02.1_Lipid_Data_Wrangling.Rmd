@@ -1,0 +1,229 @@
+---
+title: "02.1_Lipid_Data_Wrangling"
+output: 
+  html_document
+date: "2023-09-23"
+---
+
+```{r setup, include=FALSE}
+source(paste0(getwd(), "/../Config/global_options.R"))
+suppressMessages(source(paste0(getwd(), "/../Scripts/Functions.R")))
+```
+
+
+# Read in data
+
+We'll start by reading in the *batch 1* and *batch 2 results* `.xlsx` files. We are using these instead of the *all results* `.csv` due to:
+
+- There are features in the batch specific files that are not contained in the all results, and
+- Requires less feature removal and cleaning.
+
+``` {r}
+# Only want the first sheet from batch specific dataframes
+lipidConcSheetIdx <- 1
+
+# Read in data from these batch specific datasets
+batch1ResultsRaw <- paste0(wd, "Data/1E19_DonaldLynch_Batch1_Results.xlsx") %>% 
+  read_xlsx(sheet = lipidConcSheetIdx) %>% 
+  as.data.table()
+
+batch2ResultsRaw <- paste0(wd, "Data/1E19_DonaldLynch_Batch2_Results.xlsx") %>% 
+  read_xlsx(sheet = lipidConcSheetIdx) %>% 
+  as.data.table()
+```
+
+# Combine data frames
+
+First, we need to ensure that the dataframes for each batch contain the same features (in the same order). We determine which features are exclusive to each batch and then remove these from each dataframe. Then we can check the features between the two are identical:
+
+``` {r}
+# Find features which are only found in batch 1
+batch1ExclusiveFeatures <- colnames(batch1ResultsRaw)[colnames(batch1ResultsRaw) %!in% colnames(batch2ResultsRaw)]
+# Find features which are only found in batch 2
+batch2ExclusiveFeatures <- colnames(batch2ResultsRaw)[colnames(batch2ResultsRaw) %!in% colnames(batch1ResultsRaw)]
+
+# Slice dataframes to only contain features in both batch datasets
+batch1ResultsRaw <- batch1ResultsRaw[,colnames(batch1ResultsRaw) %!in% batch1ExclusiveFeatures,
+                                     with=F]
+batch2ResultsRaw <- batch2ResultsRaw[,colnames(batch2ResultsRaw) %!in% batch2ExclusiveFeatures,
+                                     with=F]
+
+# Check agreement between features
+identical(colnames(batch2ResultsRaw), colnames(batch1ResultsRaw))
+```
+
+Now we can combine the two dataframes in a row-wise fashion:
+
+``` {r}
+# Place into a single dataframe
+df <- rbind(batch1ResultsRaw, batch2ResultsRaw)
+```
+
+
+Before we move onto filtering samples and features, to make life easier we will adjust the way missing values are represented in our data. Currently they are set as `"."`. The `R` object `NA` is perfectly suited to representing a missing value, so we'll change these to `NA`:
+
+``` {r}
+# Change the encoding of missing values
+df[df == "."] <- NA
+```
+
+
+# Reformatting data
+
+Rather than having sample names stored as its own feature (currently `Name`), we can store these as separate variable:
+
+``` {r}
+# Extract the sample names from the dataframe and remove this column
+sampleNames <- df$Name
+df <- df[,colnames(df) != "Name", with=F]
+```
+
+
+
+
+
+# Sample filtering
+
+## Remove Blank and QC samples
+
+There are numerous samples within the data which correpsond to `Blank` or `QC` samples. We don't want these in our dataframe:
+
+``` {r}
+# Determine which sample rows correspond to the QC and Blank samples
+qcSampleRows <- grep("QC", sampleNames)
+blankSampleRows <- grep("Blank", sampleNames)
+
+sampleRowsToRemove <- c(qcSampleRows, blankSampleRows)
+
+# Remove these from the dataframe
+df <- df[-sampleRowsToRemove,]
+sampleNames <- sampleNames[-sampleRowsToRemove]
+```
+
+
+## Filtering samples based on NA threshold
+
+### Select threshold
+
+Across a given sample, we want no more than 50% missing values. A sample is not particularly useful if it doesn't have data for half our variables. So we set our NA proportion threshold to 0.5 (50%):
+
+
+``` {r}
+naPropThreshold <- 0.5
+```
+
+### Sample `NA` distributions
+
+By iterating over each sample, we calculate the proportion of values which are `NA`. The plot below indicates that not only are none of the samples above the threshold (note x-axis), but that there is no major different in NA distributions across the two groups:
+
+``` {r}
+# Iterate over each samples, calculating the proportion of values which are missing
+sampleNAprop <- df %>% apply(1, function(s) { sum(is.na(s))/length(s) } ) %>% unlist()
+
+# Creating plotting dataframe
+plotDF <- data.frame(class = Sample_to_Group(sampleNames),
+                     naProp = sampleNAprop) %>% as.data.table()
+
+plotDF %>% ggplot(aes(x = naProp, y = class,
+                      group = class, fill = class)) +
+  geom_boxplot() + 
+  theme_bw() + 
+  scale_fill_manual(name = "Class",
+                      values = Palette(2)) +
+  theme(legend.position = "none") +
+  xlab("NA proportion") + 
+  ylab("Sample group")
+```
+
+
+
+
+
+
+
+# Feature filtering
+
+## Filtering features based on NA threshold
+
+### Select threshold
+
+We will continue to use the `NA` threshold of 0.5 (or 50%) when filtering features. As we will be using imputation downstream, we want at least half of the data such that our imputation results are reliable. 
+
+## Feature `NA` distributions
+
+By iterating over each feature, we calculate the proportion of values which are `NA`. Splitting by lipid class, we can see that quite a few features will be removed due to the presence of `NA`s:
+
+``` {r}
+# Iterate over each feature, calculating the proportion of values which are missing
+featureNAprop <- df %>% apply(2, function(s) { sum(is.na(s))/length(s) } ) %>% unlist()
+
+# Create plotting and labelling dataframe
+plotDF <- data.frame(class = Lipid_to_Class(colnames(df)),
+                     naProp = featureNAprop) %>% as.data.table()
+
+labelDF <- data.frame(vals=paste0("n=", colnames(df) %>%  
+                                    Lipid_to_Class() %>% 
+                                    table() %>% 
+                                    as.vector()),
+                      y=1:13,
+                      x=1.1)
+
+plotDF %>% ggplot(aes(x = naProp)) +
+  geom_boxplot(aes(y = class,
+                      group = class, fill = class)) + 
+  theme_bw() + 
+  scale_fill_manual(name = "Class",
+                      values = Palette(length(unique(plotDF$class)))) +
+  theme(legend.position = "none",
+        axis.text.y.right = element_text()) +
+  xlab("NA proportion") + 
+  ylab("Lipid class") + 
+  geom_vline(xintercept = 0.5, linetype = "dotted") + 
+  geom_text(data=labelDF, aes(x=x, y=y, label=vals))
+```
+
+So now we remove those features with more than 50% missing values:
+
+``` {r}
+# Remove features with too high missing value proportion
+df <- df[,featureNAprop < naPropThreshold, with=F]
+```
+
+
+## Ensure data is numeric
+
+Sometimes data can be represented as characters (ie. `"0.5"`). We want these values stored as numerics (ie. `0.5`), so we will coerce them in a column-wise fashion:
+
+```{r}
+# Coerce all features into numerics
+df <- df %>% lapply(as.numeric) %>% as.data.table()
+```
+
+
+
+## Centering data
+
+Downstream exploration indicated that the lipid features required centering. In order to preserve the unique variance of each feature, we won't scale the data yet.
+
+```{r}
+# Note: scale is set to FALSE here so variance is retained
+df <- df %>% scale(center = T,
+                   scale = F) %>% as.data.table()
+```
+
+# Save cleaned data frame
+
+Now we are left with a lipid data frame with 70 samples (all `CAD` and `noCAD`) and 614 features:
+
+```{r}
+dim(df)
+```
+
+We can save this to an `.rds` object so we can open it up in downstream scripts. We also include the sample names:
+
+``` {r}
+obj <- list(df = df,
+            sampleNames = sampleNames)
+
+obj %>% saveRDS(paste0(wd, "RDS/Data_Objects/cleaned_lipid_data.rds"))
+```
