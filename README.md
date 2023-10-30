@@ -1,5 +1,5 @@
 
-This repository is dedicated to the analysis undergone by Max Bladen between August and October (2023) for Patrick Albertus and Donald Lynch from the University of Cincinnati. The repository is structued as follows:
+This repository is dedicated to the analysis undergone by Max Bladen between August and October (2023) for Patrick Albertus and Donald Lynch from the University of Cincinnati. The `mixOmcis` package was used in order to evaluate the efficacy of model building on lipid and proteomic data from high- and low- CAD risk diabetes patients. The repository is structued as follows:
 
 - `Config`:
   - Contains a single `.R` file which handles the configuration of the `.Rmd` knitting process. Not relevant to actual analysis, purely to maintain consistency across reports
