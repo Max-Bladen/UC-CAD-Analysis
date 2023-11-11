@@ -12,3 +12,5 @@ This repository is dedicated to the analysis undergone by Max Bladen between Aug
   - `.html` files yielded by knitting the `.Rmd` files in `Markdowns`. Best to download/clone this repository and view these `.html` files locally, as Github cannot render them properly
 - `Scripts`:
   - Contains any `.R` files used as part of the analysis that are outside the `.Rmd`. Currently only contains `Functions.R` which is a sourced script used to store some custom functions which were repeatedly used.
+
+To rerun the `.Rmd` scripts, make sure you adjust the `wd` variable in the `Config/global_options.R` script
